@@ -1,0 +1,42 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Basic validation helper
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    function isValidCertificate(data) {
+      return data.keys().hasAll(['title', 'category', 'date', 'imageUrl', 'createdAt', 'fileType', 'userId', 'userName']) &&
+             data.keys().hasAny(['title', 'category', 'date', 'imageUrl', 'createdAt', 'fileType', 'credentialUrl', 'description', 'isFeatured', 'userId', 'userName']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.category is string && data.category.size() > 0 && data.category.size() <= 100 &&
+             data.date is string && data.date.size() > 0 && data.date.size() <= 50 &&
+             data.imageUrl is string && data.imageUrl.size() > 0 && data.imageUrl.size() <= 1000 &&
+             data.fileType is string && data.fileType.size() > 0 && data.fileType.size() <= 20 &&
+             data.userId is string && data.userId.size() > 0 && data.userId.size() <= 128 &&
+             data.userName is string && data.userName.size() > 0 && data.userName.size() <= 100 &&
+             data.createdAt is timestamp;
+    }
+
+    match /{document=**} {
+      allow read: if true;
+    }
+
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /certificates/{certificateId} {
+      allow read: if true;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null && (resource.data.userId == request.auth.uid || !("userId" in resource.data));
+      allow delete: if request.auth != null && (resource.data.userId == request.auth.uid || !("userId" in resource.data));
+    }
+  }
+}

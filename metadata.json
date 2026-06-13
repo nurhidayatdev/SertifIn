@@ -1,0 +1,6 @@
+{
+  "name": "SertifIn",
+  "description": "A brutalist-style single page application to manage and showcase certificates using Firebase and Tailwind CSS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

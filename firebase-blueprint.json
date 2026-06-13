@@ -1,0 +1,27 @@
+{
+  "entities": {
+    "Certificate": {
+      "title": "Certificate",
+      "description": "Represents a user certificate or credential.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "The title of the certificate." },
+        "category": { "type": "string", "description": "The category of the certificate." },
+        "date": { "type": "string", "description": "The date the certificate was issued." },
+        "credentialUrl": { "type": "string", "description": "The URL of the credential." },
+        "description": { "type": "string", "description": "Description of the certificate." },
+        "isFeatured": { "type": "boolean", "description": "Whether the certificate is featured." },
+        "imageUrl": { "type": "string", "description": "The URL of the certificate's image or PDF." },
+        "fileType": { "type": "string", "description": "The type of the file (image or pdf)." },
+        "createdAt": { "type": "object", "description": "Server timestamp of creation." }
+      },
+      "required": ["title", "category", "date", "imageUrl", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/certificates/{certificateId}": {
+      "schema": { "$ref": "#/entities/Certificate" },
+      "description": "Stores user certificates."
+    }
+  }
+}
