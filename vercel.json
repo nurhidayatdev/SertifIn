@@ -8,6 +8,10 @@
     {
       "source": "/api/extract",
       "destination": "/api/extract.ts"
+    },
+    {
+      "source": "/u/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
