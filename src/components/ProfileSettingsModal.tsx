@@ -31,9 +31,9 @@ export function ProfileSettingsModal({
         if (docSnap.exists()) {
           const profile = docSnap.data() as UserProfile;
           setUsername(profile.username || "");
-          setDisplayName(profile.displayName || user.displayName || "");
+          setDisplayName((profile.displayName || user.displayName || "").replace(/[^a-zA-Z\s]/g, "").toUpperCase());
         } else {
-          setDisplayName(user.displayName || "");
+          setDisplayName((user.displayName || "").replace(/[^a-zA-Z\s]/g, "").toUpperCase());
         }
       } catch (e) {
         console.error(e);
@@ -49,8 +49,23 @@ export function ProfileSettingsModal({
     const cleanUsername = username.trim().toLowerCase();
     const cleanDisplayName = displayName.trim();
 
-    if (!cleanUsername.match(/^[a-zA-Z0-9_]+$/)) {
-      setError("Username hanya boleh berisi huruf, angka, dan garis bawah.");
+    if (cleanUsername.length < 4) {
+      setError("Tautan profil harus memiliki panjang minimal 4 karakter.");
+      return;
+    }
+
+    if (!/^[a-z0-9-]+$/.test(cleanUsername)) {
+      setError("Tautan profil hanya boleh menggunakan huruf kecil, angka, serta simbol hubung (-).");
+      return;
+    }
+
+    if (!/^[a-z]/.test(cleanUsername)) {
+      setError("Angka dan simbol tidak boleh di awal tautan profil. Harus dimulai dengan huruf kecil.");
+      return;
+    }
+
+    if (!/[a-z0-9]$/.test(cleanUsername)) {
+      setError("Simbol tidak boleh di akhir tautan profil.");
       return;
     }
     
@@ -133,12 +148,20 @@ export function ProfileSettingsModal({
                   <input 
                     type="text"
                     value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-semibold"
-                    placeholder="Contoh: Nur Hidayat"
+                    onChange={(e) => {
+                      const uppercaseNoNumSymbol = e.target.value.replace(/[^a-zA-Z\s]/g, "").toUpperCase();
+                      setDisplayName(uppercaseNoNumSymbol);
+                    }}
+                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-bold tracking-wide"
+                    placeholder="CONTOH: NUR HIDAYAT"
                     required
                   />
-                  <p className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">Nama ini akan digunakan secara otomatis sebagai nama pemilik pada seluruh halaman kredensial Anda.</p>
+                  <p className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">
+                    Nama ini akan digunakan secara otomatis pada halaman kredensial Anda.
+                  </p>
+                  <p className="text-[10px] text-amber-600 font-semibold mt-1 flex items-center gap-1">
+                    <span>⚠️</span> Hanya menerima karakter huruf (A-Z) dan spasi (tanpa angka/simbol).
+                  </p>
                 </div>
 
                 <div>
@@ -158,9 +181,15 @@ export function ProfileSettingsModal({
                       required
                     />
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">
+                  <p className="text-[11px] text-gray-450 mt-1.5 leading-relaxed">
                     Alamat web unik portofolio Anda: <span className="font-mono text-gray-600 bg-gray-50 px-1 rounded">{window.location.origin}/u/{username || "nurhidayat"}</span>
                   </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1 text-[10px] text-gray-500 font-medium">
+                    <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Min. 4 Karakter</span>
+                    <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Awal: Harus Huruf Kecil</span>
+                    <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Akhir: Bukan Simbol (-)</span>
+                    <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Huruf Kecil, Angka, Simbol (-)</span>
+                  </div>
                 </div>
               </div>
               

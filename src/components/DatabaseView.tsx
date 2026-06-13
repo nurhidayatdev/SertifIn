@@ -13,9 +13,22 @@ import {
   PlusCircle,
   Eye,
   Trash,
-  AlertCircle
+  AlertCircle,
+  FileText
 } from "lucide-react";
 import { Certificate, CATEGORIES } from "../types";
+import { DeleteConfirmModal } from "./DeleteConfirmModal";
+
+// Helper to convert Google Drive URL to thumbnail format
+const getDisplayImageUrl = (cert: Certificate) => {
+  if (cert.fileType === 'pdf' && cert.imageUrl?.includes('drive.google.com')) {
+    const match = cert.imageUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) {
+      return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w300`;
+    }
+  }
+  return cert.imageUrl;
+};
 
 interface DatabaseViewProps {
   certificates: Certificate[];
@@ -38,6 +51,8 @@ export function DatabaseView({
   const [selectedCat, setSelectedCat] = useState("Semua");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [idToDelete, setIdToDelete] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
 
   // Filter & Sort logic
   const filtered = certificates
@@ -51,7 +66,10 @@ export function DatabaseView({
         (cert.credentialId || "").toLowerCase().includes(searchLower) ||
         (cert.description || "").toLowerCase().includes(searchLower);
       
-      const matchesCategory = selectedCat === "Semua" || cert.category === selectedCat;
+      const matchesCategory = 
+        selectedCat === "Semua" ? true :
+        selectedCat === "Unggulan" ? cert.isFeatured === true :
+        cert.category === selectedCat;
       return matchesSearch && matchesCategory;
     })
     .sort((a, b) => {
@@ -77,18 +95,26 @@ export function DatabaseView({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const confirmDelete = async (id: string) => {
-    if (confirm("Apakah Anda yakin ingin menghapus sertifikat ini?")) {
-      try {
-        await onDelete(id);
-      } catch (err) {
-        console.error(err);
-      }
+  const confirmDelete = (id: string) => {
+    setIdToDelete(id);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!idToDelete) return;
+    setIsDeleting(true);
+    try {
+      await onDelete(idToDelete);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsDeleting(false);
+      setIdToDelete(null);
     }
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+    <>
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
       {/* Controls Header */}
       <div className="p-5 md:p-6 border-b border-gray-100 bg-gray-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -126,6 +152,7 @@ export function DatabaseView({
             className="text-xs font-bold text-gray-700 bg-white border border-gray-200 rounded-xl px-3 py-2 cursor-pointer focus:outline-none focus:ring-2 focus:ring-black"
           >
             <option value="Semua">Semua Kategori</option>
+            <option value="Unggulan">⭐ Unggulan</option>
             {CATEGORIES.map((cat) => (
               <option key={cat} value={cat}>{cat}</option>
             ))}
@@ -154,13 +181,20 @@ export function DatabaseView({
                   <td className="px-6 py-4 max-w-xs lg:max-w-md">
                     <div className="flex items-start gap-3">
                       <div className="w-10 h-10 border border-gray-100 rounded-lg overflow-hidden shrink-0 bg-gray-50 flex items-center justify-center">
-                        {cert.imageUrl ? (
+                        {cert.imageUrl && !imageErrors[cert.id || ""] ? (
                           <img 
-                            src={cert.imageUrl} 
+                            src={getDisplayImageUrl(cert)} 
                             alt={cert.title} 
                             className="w-full h-full object-cover" 
                             referrerPolicy="no-referrer"
+                            onError={() => {
+                              if (cert.id) {
+                                setImageErrors((prev) => ({ ...prev, [cert.id]: true }));
+                              }
+                            }}
                           />
+                        ) : cert.fileType === "pdf" ? (
+                          <FileText className="w-5 h-5 text-red-500" />
                         ) : (
                           <Award className="w-5 h-5 text-gray-400" />
                         )}
@@ -302,13 +336,20 @@ export function DatabaseView({
                 {/* Header card info */}
                 <div className="flex items-start gap-3">
                   <div className="w-12 h-12 border border-gray-250 rounded-xl overflow-hidden shrink-0 bg-white flex items-center justify-center">
-                    {cert.imageUrl ? (
+                    {cert.imageUrl && !imageErrors[cert.id || ""] ? (
                       <img 
-                        src={cert.imageUrl} 
+                        src={getDisplayImageUrl(cert)} 
                         alt={cert.title} 
                         className="w-full h-full object-cover" 
                         referrerPolicy="no-referrer"
+                        onError={() => {
+                          if (cert.id) {
+                            setImageErrors((prev) => ({ ...prev, [cert.id]: true }));
+                          }
+                        }}
                       />
+                    ) : cert.fileType === "pdf" ? (
+                      <FileText className="w-6 h-6 text-red-500" />
                     ) : (
                       <Award className="w-5 h-5 text-gray-400" />
                     )}
@@ -428,5 +469,15 @@ export function DatabaseView({
         </div>
       </div>
     </div>
+
+    <DeleteConfirmModal 
+      isOpen={!!idToDelete}
+        title="Hapus Sertifikat"
+        description="Apakah Anda yakin ingin menghapus sertifikat ini? Tindakan ini tidak dapat dibatalkan, dan jika file disimpan di Google Drive maka file tersebut juga akan dihapus secara permanen."
+        isDeleting={isDeleting}
+        onClose={() => setIdToDelete(null)}
+        onConfirm={handleConfirmDelete}
+      />
+    </>
   );
 }

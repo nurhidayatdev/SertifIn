@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Certificate } from "../types";
 import { X, ExternalLink, Calendar, Tag, Trash2, Pencil } from "lucide-react";
+import { DeleteConfirmModal } from "./DeleteConfirmModal";
 
 interface CertificateModalProps {
   cert: Certificate | null;
@@ -33,6 +34,7 @@ const getPdfEmbedUrl = (url: string) => {
 
 export function CertificateModal({ cert, onClose, isOwner, onDelete, onEdit }: CertificateModalProps) {
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -44,7 +46,8 @@ export function CertificateModal({ cert, onClose, isOwner, onDelete, onEdit }: C
   if (!cert) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 md:p-12">
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 md:p-12">
       <div 
         className="absolute inset-0 bg-gray-900/40 backdrop-blur-sm transition-opacity" 
         onClick={onClose}
@@ -111,16 +114,7 @@ export function CertificateModal({ cert, onClose, isOwner, onDelete, onEdit }: C
                 )}
                 {onDelete && (
                   <button 
-                    onClick={async () => {
-                       if (window.confirm("Apakah Anda yakin ingin menghapus sertifikat ini?")) {
-                         setIsDeleting(true);
-                         try {
-                           await onDelete(cert.id!);
-                         } catch (e) {
-                           setIsDeleting(false);
-                         }
-                       }
-                    }}
+                    onClick={() => setShowDeleteModal(true)}
                     disabled={isDeleting}
                     className="text-red-500 hover:text-red-700 p-2 rounded-full hover:bg-red-50 transition-colors disabled:opacity-50"
                     title="Hapus Sertifikat"
@@ -237,5 +231,24 @@ export function CertificateModal({ cert, onClose, isOwner, onDelete, onEdit }: C
         </div>
       </div>
     </div>
+
+    <DeleteConfirmModal 
+      isOpen={showDeleteModal}
+        title="Hapus Sertifikat"
+        description="Apakah Anda yakin ingin menghapus sertifikat ini? Tindakan ini tidak dapat dibatalkan, dan jika file disimpan di Google Drive maka file tersebut juga akan dihapus secara permanen."
+        isDeleting={isDeleting}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={async () => {
+          setIsDeleting(true);
+          try {
+            await onDelete?.(cert.id!);
+          } catch (e) {
+            setIsDeleting(false);
+          } finally {
+            setShowDeleteModal(false);
+          }
+        }}
+      />
+    </>
   );
 }

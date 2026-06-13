@@ -7,11 +7,22 @@ import { AdminForm } from "./components/AdminForm";
 import { ProfileSettingsModal } from "./components/ProfileSettingsModal";
 import CertificatePage from "./components/CertificatePage";
 import { Certificate, CATEGORIES } from "./types";
-import { db, googleSignIn, logout, initAuth } from "./firebase";
+import { db, googleSignIn, logout, initAuth, getAccessToken } from "./firebase";
 import { collection, query, orderBy, where, onSnapshot, getDoc, doc, getDocs, deleteDoc } from "firebase/firestore";
 import { User } from "firebase/auth";
 import { DatabaseView } from "./components/DatabaseView";
-import { Database, LayoutGrid, Award } from "lucide-react";
+import { Database, LayoutGrid, Award, Copy, Check, X, Share2 } from "lucide-react";
+
+const getDriveId = (url?: string) => {
+  if (!url) return null;
+  if (url.includes("drive.google.com")) {
+    const m1 = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (m1 && m1[1]) return m1[1];
+    const m2 = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (m2 && m2[1]) return m2[1];
+  }
+  return null;
+};
 
 function Vault() {
   const { userId } = useParams<{ userId: string }>();
@@ -25,6 +36,8 @@ function Vault() {
   const [isSettingsVisible, setIsSettingsVisible] = useState(false);
   const [isForceFill, setIsForceFill] = useState(false);
   const [selectedCert, setSelectedCert] = useState<Certificate | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isCopiedShare, setIsCopiedShare] = useState(false);
 
   useEffect(() => {
     if (!isAuthLoading && user) {
@@ -166,7 +179,10 @@ function Vault() {
         (cert.credentialId || "").toLowerCase().includes(searchLower) ||
         (cert.description || "").toLowerCase().includes(searchLower);
 
-      const matchesCategory = selectedCategory === "Semua" || cert.category === selectedCategory;
+      const matchesCategory = 
+        selectedCategory === "Semua" ? true :
+        selectedCategory === "Unggulan" ? cert.isFeatured === true :
+        cert.category === selectedCategory;
       return matchesSearch && matchesCategory;
     })
     .sort((a, b) => {
@@ -214,6 +230,44 @@ function Vault() {
 
   const handleDelete = async (certId: string) => {
     try {
+      const cert = certificates.find(c => c.id === certId);
+      if (cert) {
+        const driveId = getDriveId(cert.credentialUrl) || getDriveId(cert.imageUrl);
+        if (driveId) {
+          try {
+            let accessToken = await getAccessToken();
+            if (!accessToken) {
+              const res = await googleSignIn();
+              if (res) {
+                accessToken = res.accessToken;
+              }
+            }
+            if (accessToken) {
+              const driveDeleteRes = await fetch(`https://www.googleapis.com/drive/v3/files/${driveId}`, {
+                method: "DELETE",
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                },
+              });
+              if (driveDeleteRes.status === 401) {
+                const res = await googleSignIn();
+                if (res) {
+                  await fetch(`https://www.googleapis.com/drive/v3/files/${driveId}`, {
+                    method: "DELETE",
+                    headers: {
+                      Authorization: `Bearer ${res.accessToken}`,
+                    },
+                  });
+                }
+              }
+              console.log("File di Google Drive berhasil dihapus.");
+            }
+          } catch (driveErr) {
+            console.error("Error deleting file from Google Drive:", driveErr);
+          }
+        }
+      }
+
       await deleteDoc(doc(db, "certificates", certId));
       setSelectedCert(null);
     } catch (error) {
@@ -315,13 +369,12 @@ function Vault() {
             {isOwner && (
               <button 
                 onClick={() => {
-                  const shareUrl = `${window.location.origin}/u/${userId}`;
-                  navigator.clipboard.writeText(shareUrl);
-                  alert(`Tautan disalin ke papan klip: ${shareUrl}`);
+                  setIsShareModalOpen(true);
+                  setIsCopiedShare(false);
                 }}
                 className="px-4 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm shadow-sm hover:shadow-md"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                <Share2 className="w-4 h-4" />
                 Bagikan Profil
               </button>
             )}
@@ -357,6 +410,21 @@ function Vault() {
                     selectedCategory === "Semua" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500 group-hover:bg-gray-200"
                   }`}>
                     {certificates.length}
+                  </span>
+                </button>
+                <button
+                  onClick={() => setSelectedCategory("Unggulan")}
+                  className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition-all text-left group ${
+                    selectedCategory === "Unggulan" ? "bg-amber-600 text-white" : "text-amber-600 hover:bg-amber-50"
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 font-bold">
+                    <span>⭐</span> Unggulan
+                  </span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full transition-colors ${
+                    selectedCategory === "Unggulan" ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700 group-hover:bg-amber-200"
+                  }`}>
+                    {certificates.filter(cert => cert.isFeatured === true).length}
                   </span>
                 </button>
                 {CATEGORIES.map((cat) => {
@@ -488,6 +556,87 @@ function Vault() {
         onDelete={handleDelete}
         onEdit={() => selectedCert && handleEdit(selectedCert)}
       />
+
+      {isShareModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transform transition-all animate-in fade-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
+                  <Share2 className="w-5 h-5 animate-pulse" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-950 font-sans">Bagikan Profil Publik</h3>
+              </div>
+              <button 
+                onClick={() => setIsShareModalOpen(false)}
+                className="p-1.5 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-all font-sans"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-5">
+              <p className="text-sm text-gray-600 leading-relaxed mb-4 font-sans">
+                Gunakan tautan di bawah ini untuk membagikan galeri sertifikat digital publik Anda kepada rekan kerja, perekrut, atau unggah ke CV.
+              </p>
+
+              {/* Tautan Input */}
+              <div className="relative flex items-center mb-5 bg-gray-50 border border-gray-200 rounded-xl p-1 shadow-sm">
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={`${window.location.origin}/u/${userId}`}
+                  className="w-full pl-3 pr-28 py-2 text-xs font-semibold font-mono text-blue-700 bg-transparent border-none focus:outline-none select-all"
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(`${window.location.origin}/u/${userId}`);
+                    setIsCopiedShare(true);
+                    setTimeout(() => setIsCopiedShare(false), 2000);
+                  }}
+                  className={`absolute right-1 px-3.5 py-2 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-all text-white shadow ${
+                    isCopiedShare 
+                      ? "bg-green-600 hover:bg-green-700 font-sans" 
+                      : "bg-blue-600 hover:bg-blue-700 font-sans"
+                  }`}
+                >
+                  {isCopiedShare ? (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      Tersalin!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      Salin Link
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Tips */}
+              <div className="bg-amber-50/50 border border-amber-100 rounded-xl p-3 text-xs text-amber-800 flex gap-2 font-sans">
+                <div className="font-bold shrink-0">💡 Info:</div>
+                <p className="leading-relaxed">
+                  Semua berkas sertifikat Anda yang disimpan di Google Drive akan tetap diakses secara aman sesuai izin akses drive publik yang diatur.
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-gray-50/50 border-t border-gray-100 flex justify-end">
+              <button
+                onClick={() => setIsShareModalOpen(false)}
+                className="px-4 py-2 bg-white border border-gray-200 text-sm font-semibold rounded-xl text-gray-700 hover:bg-gray-50 transition-colors shadow-sm font-sans"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Certificate, CATEGORIES } from "../types";
 import { db, getAccessToken, googleSignIn } from "../firebase";
-import { collection, addDoc, updateDoc, doc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, updateDoc, doc, serverTimestamp, getDoc } from "firebase/firestore";
 import { Upload, Sparkles, PencilLine, ArrowLeft, X, Cpu, CheckCircle } from "lucide-react";
 
 import { User } from "firebase/auth";
@@ -23,6 +23,17 @@ const MONTHS = [
 
 const currentYear = new Date().getFullYear();
 const YEARS = Array.from({ length: 30 }, (_, i) => (currentYear - 20 + i).toString()).reverse();
+
+const getDriveId = (url?: string) => {
+  if (!url) return null;
+  if (url.includes("drive.google.com")) {
+    const m1 = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (m1 && m1[1]) return m1[1];
+    const m2 = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (m2 && m2[1]) return m2[1];
+  }
+  return null;
+};
 
 export function AdminForm({ onSuccess, onCancel, user, initialData }: { onSuccess: () => void, onCancel: () => void, user: User, initialData?: Certificate }) {
   const [step, setStep] = useState<"choice" | "form">(initialData ? "form" : "choice");
@@ -50,6 +61,26 @@ export function AdminForm({ onSuccess, onCancel, user, initialData }: { onSucces
   const [isAutofilling, setIsAutofilling] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isDriveAuthorized, setIsDriveAuthorized] = useState<boolean | null>(null);
+  const [profileDisplayName, setProfileDisplayName] = useState<string>("");
+
+  // Fetch the user's latest profile display name from Firestore
+  useEffect(() => {
+    const fetchProfileDisplayName = async () => {
+      try {
+        const docRef = doc(db, "users", user.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const profile = docSnap.data();
+          if (profile && profile.displayName) {
+            setProfileDisplayName(profile.displayName);
+          }
+        }
+      } catch (e) {
+        console.error("Error loading user profile description for naming:", e);
+      }
+    };
+    fetchProfileDisplayName();
+  }, [user]);
 
   // Verify Google Drive OAuth access token on mount
   useEffect(() => {
@@ -294,8 +325,13 @@ export function AdminForm({ onSuccess, onCancel, user, initialData }: { onSucces
         try {
           const folderId = await getOrCreateFolder(token);
           const base64Data = (reader.result as string).split(',')[1];
+          const ext = f.name.includes('.') ? f.name.slice(f.name.lastIndexOf('.')) : '';
+          const certTitle = title ? title.trim() : "Sertifikat";
+          const resolvedUserName = profileDisplayName ? profileDisplayName.trim() : (user?.displayName ? user.displayName.trim() : (user?.email ? user.email.split('@')[0] : "User"));
+          const customFileName = `${certTitle}_${resolvedUserName}${ext}`;
+
           const metadata = {
-            name: `Vault_${Date.now()}_${f.name}`,
+            name: customFileName,
             mimeType: f.type,
             parents: [folderId]
           };
@@ -368,6 +404,12 @@ export function AdminForm({ onSuccess, onCancel, user, initialData }: { onSucces
     
     setIsSubmitting(true);
     try {
+      let oldFileIdToDelete: string | null = null;
+      if (file && initialData) {
+        const oldUrl = initialData.credentialUrl || initialData.imageUrl;
+        oldFileIdToDelete = getDriveId(oldUrl);
+      }
+
       let downloadURL = initialData?.imageUrl;
       let finalFileType = initialData?.fileType;
 
@@ -440,6 +482,22 @@ export function AdminForm({ onSuccess, onCancel, user, initialData }: { onSucces
 
       if (initialData && initialData.id) {
         await updateDoc(doc(db, "certificates", initialData.id), payload);
+        if (oldFileIdToDelete && downloadURL !== initialData.imageUrl) {
+          try {
+            const accessToken = await getAccessToken();
+            if (accessToken) {
+              await fetch(`https://www.googleapis.com/drive/v3/files/${oldFileIdToDelete}`, {
+                method: "DELETE",
+                headers: {
+                  Authorization: `Bearer ${accessToken}`,
+                },
+              });
+              console.log("Old Google Drive file deleted successfully:", oldFileIdToDelete);
+            }
+          } catch (delErr) {
+            console.warn("Failed to delete previous Google Drive file:", delErr);
+          }
+        }
       } else {
         payload.createdAt = serverTimestamp();
         payload.userId = user.uid;
