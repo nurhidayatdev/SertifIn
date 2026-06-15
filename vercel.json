@@ -12,6 +12,10 @@
     {
       "source": "/u/(.*)",
       "destination": "/index.html"
+    },
+    {
+      "source": "/c/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
