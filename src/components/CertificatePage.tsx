@@ -374,9 +374,14 @@ export default function CertificatePage() {
               {(owner?.displayName || cert.userName) && (
                 <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 justify-between">
                   <span className="font-bold text-gray-700 uppercase text-[11px] tracking-wider">Pemilik Sertifikat</span>
-                  <span className="text-gray-900 font-semibold">
-                    {owner?.displayName || cert.userName}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {owner?.photoURL && (
+                      <img src={owner.photoURL} alt={owner.displayName} className="w-6 h-6 rounded-full object-cover border border-gray-200" />
+                    )}
+                    <span className="text-gray-900 font-semibold">
+                      {owner?.displayName || cert.userName}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>

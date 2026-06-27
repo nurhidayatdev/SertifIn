@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from "react";
-import { BrowserRouter as Router, Routes, Route, useParams, useNavigate } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, useParams, useNavigate, Link } from "react-router-dom";
 import { Header } from "./components/Header";
+import { FilterBar } from "./components/FilterBar";
 import { CertificateCard } from "./components/CertificateCard";
 import { CertificateModal } from "./components/CertificateModal";
 import { AdminForm } from "./components/AdminForm";
 import { ProfileSettingsModal } from "./components/ProfileSettingsModal";
 import CertificatePage from "./components/CertificatePage";
-import { Certificate, CATEGORIES } from "./types";
+import { Certificate, CATEGORIES, UserProfile } from "./types";
 import { db, googleSignIn, logout, initAuth, getAccessToken } from "./firebase";
 import { collection, query, orderBy, where, onSnapshot, getDoc, doc, getDocs, deleteDoc } from "firebase/firestore";
 import { User } from "firebase/auth";
 import { DatabaseView } from "./components/DatabaseView";
-import { Database, LayoutGrid, Award, Copy, Check, X, Share2 } from "lucide-react";
+import { Database, LayoutGrid, Award, Copy, Check, X, Share2, Linkedin, Instagram, Github, Facebook, Globe, Music2, Link as LinkIcon } from "lucide-react";
 
 const getDriveId = (url?: string) => {
   if (!url) return null;
@@ -24,7 +25,7 @@ const getDriveId = (url?: string) => {
   return null;
 };
 
-function Vault() {
+function Vault({ defaultView = "grid" }: { defaultView?: "grid" | "table" }) {
   const { userId } = useParams<{ userId: string }>();
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
@@ -32,6 +33,10 @@ function Vault() {
   const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Semua");
+  const [dateFilterType, setDateFilterType] = useState<string>("Semua Waktu");
+  const [customDateStart, setCustomDateStart] = useState<string>("");
+  const [customDateEnd, setCustomDateEnd] = useState<string>("");
+  const [selectedMonth, setSelectedMonth] = useState<string>("");
   const [isAdminVisible, setIsAdminVisible] = useState(false);
   const [isSettingsVisible, setIsSettingsVisible] = useState(false);
   const [isForceFill, setIsForceFill] = useState(false);
@@ -60,10 +65,16 @@ function Vault() {
     }
   }, [user, isAuthLoading]);
   const [certToEdit, setCertToEdit] = useState<Certificate | null>(null);
-  const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
+  const [viewMode, setViewMode] = useState<"grid" | "table">(defaultView);
+  
+  useEffect(() => {
+    setViewMode(defaultView);
+  }, [defaultView]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [errorInfo, setErrorInfo] = useState("");
   const [ownerName, setOwnerName] = useState<string | null>(null);
+  const [ownerProfile, setOwnerProfile] = useState<UserProfile | null>(null);
   const [resolvedUid, setResolvedUid] = useState<string | null>(null);
 
   useEffect(() => {
@@ -108,15 +119,17 @@ function Vault() {
       try {
         let targetUid = userId;
         let pName = null;
+        let profileData: UserProfile | null = null;
         
         // Fast path: try as UID first
         const docSnap = await getDoc(doc(db, "users", userId));
         if (docSnap.exists()) {
-           targetUid = docSnap.data().uid;
-           pName = docSnap.data().displayName;
+           profileData = docSnap.data() as UserProfile;
+           targetUid = profileData.uid;
+           pName = profileData.displayName;
            
            // Redirect to custom username if it exists to keep URL clean
-           const customUsername = docSnap.data().username;
+           const customUsername = profileData.username;
            if (customUsername && userId === targetUid) {
              navigate(`/u/${customUsername}`, { replace: true });
              return;
@@ -126,12 +139,14 @@ function Vault() {
            const qUser = query(collection(db, "users"), where("username", "==", userId));
            const qr = await getDocs(qUser);
            if (!qr.empty) {
-             targetUid = qr.docs[0].data().uid;
-             pName = qr.docs[0].data().displayName;
+             profileData = qr.docs[0].data() as UserProfile;
+             targetUid = profileData.uid;
+             pName = profileData.displayName;
            }
         }
         
         setResolvedUid(targetUid);
+        setOwnerProfile(profileData);
         if (pName) setOwnerName(pName);
 
         const q = query(
@@ -183,7 +198,55 @@ function Vault() {
         selectedCategory === "Semua" ? true :
         selectedCategory === "Unggulan" ? cert.isFeatured === true :
         cert.category === selectedCategory;
-      return matchesSearch && matchesCategory;
+
+      let matchesDate = true;
+      if (dateFilterType !== "Semua Waktu") {
+        const certDate = cert.date ? new Date(cert.date) : null;
+        
+        if (!certDate || isNaN(certDate.getTime())) {
+           matchesDate = false;
+        } else {
+          const now = new Date();
+          const msPerDay = 24 * 60 * 60 * 1000;
+          const diffDays = (now.getTime() - certDate.getTime()) / msPerDay;
+
+          if (dateFilterType === "7 Hari Terakhir") {
+            matchesDate = diffDays <= 7 && diffDays >= 0;
+          } else if (dateFilterType === "30 Hari Terakhir") {
+            matchesDate = diffDays <= 30 && diffDays >= 0;
+          } else if (dateFilterType === "90 Hari Terakhir") {
+            matchesDate = diffDays <= 90 && diffDays >= 0;
+          } else if (dateFilterType === "365 Hari Terakhir") {
+            matchesDate = diffDays <= 365 && diffDays >= 0;
+          } else if (dateFilterType === "Rentang Kustom") {
+            const start = customDateStart ? new Date(customDateStart) : null;
+            const end = customDateEnd ? new Date(customDateEnd) : null;
+            
+            // Set end date to end of day to include the selected date fully
+            if (end) {
+              end.setHours(23, 59, 59, 999);
+            }
+            if (start) {
+              start.setHours(0, 0, 0, 0);
+            }
+            
+            if (start && end) {
+              matchesDate = certDate >= start && certDate <= end;
+            } else if (start) {
+              matchesDate = certDate >= start;
+            } else if (end) {
+              matchesDate = certDate <= end;
+            }
+          } else if (dateFilterType === "Bulan Tertentu") {
+            if (selectedMonth) {
+              const [year, month] = selectedMonth.split('-');
+              matchesDate = certDate.getFullYear() === parseInt(year) && (certDate.getMonth() + 1) === parseInt(month);
+            }
+          }
+        }
+      }
+
+      return matchesSearch && matchesCategory && matchesDate;
     })
     .sort((a, b) => {
       const dateA = a.date ? new Date(a.date).getTime() : 0;
@@ -329,18 +392,33 @@ function Vault() {
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col min-h-screen">
         <Header 
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          isAdminVisible={isAdminVisible}
-          onAdminToggle={() => {
-            setIsAdminVisible(!isAdminVisible);
-            if (!isAdminVisible) setCertToEdit(null);
-          }}
           onLogout={handleLogout}
           onLogin={handleLogin}
           user={user}
           isOwner={isOwner}
           onSettings={() => setIsSettingsVisible(true)}
+        />
+
+        <FilterBar
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          selectedCategory={selectedCategory}
+          setSelectedCategory={setSelectedCategory}
+          dateFilterType={dateFilterType}
+          setDateFilterType={setDateFilterType}
+          selectedMonth={selectedMonth}
+          setSelectedMonth={setSelectedMonth}
+          customDateStart={customDateStart}
+          setCustomDateStart={setCustomDateStart}
+          customDateEnd={customDateEnd}
+          setCustomDateEnd={setCustomDateEnd}
+          certificates={certificates}
+          isOwner={isOwner || false}
+          isAdminVisible={isAdminVisible}
+          onAdminToggle={() => {
+            setIsAdminVisible(!isAdminVisible);
+            if (!isAdminVisible) setCertToEdit(null);
+          }}
         />
 
          {isSettingsVisible && user && (
@@ -354,104 +432,8 @@ function Vault() {
           />
         )}
 
-        {userId && (
-          <div className="mb-5 p-6 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">{isOwner ? "Galeri Sertifikat Saya" : `Galeri ${ownerName || "Pengguna"}`}</h2>
-              <p className="text-sm text-gray-500 mt-1">Galeri ini bersifat publik. Siapa pun yang memiliki tautan dapat melihat sertifikat ini.</p>
-              <div className="mt-2 flex items-center gap-2">
-                <span className="text-xs text-gray-400 font-medium font-sans">Tautan Publik:</span>
-                <span className="text-xs text-blue-600 font-mono font-semibold bg-blue-50/50 px-2 py-1 rounded border border-blue-100/50 select-all">
-                  {window.location.origin}/u/{userId}
-                </span>
-              </div>
-            </div>
-            {isOwner && (
-              <button 
-                onClick={() => {
-                  setIsShareModalOpen(true);
-                  setIsCopiedShare(false);
-                }}
-                className="px-4 py-2.5 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 text-sm shadow-sm hover:shadow-md"
-              >
-                <Share2 className="w-4 h-4" />
-                Bagikan Profil
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="flex flex-col lg:flex-row gap-8 flex-grow">
-          {/* Sidebar */}
-          <aside className="w-full lg:w-64 flex-shrink-0 flex flex-col gap-6">
-            {/* Total Certificate Card */}
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50/40 border border-blue-100/70 rounded-2xl p-5 shadow-sm">
-              <div className="text-[10px] font-extrabold text-blue-700/80 uppercase tracking-widest">Total Sertifikat</div>
-              <div className="mt-1.5 flex items-baseline gap-2">
-                <span className="text-3xl font-black text-gray-900 tracking-tight">{certificates.length}</span>
-                <span className="text-xs font-semibold text-blue-700">Berkas</span>
-              </div>
-              <p className="text-[11px] text-blue-600/70 mt-1 leading-relaxed">
-                Kredensial Anda terverifikasi dan aman di dalam Google Drive Anda.
-              </p>
-            </div>
-
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-              <h2 className="font-extrabold text-gray-900 mb-4 text-sm uppercase tracking-wider text-gray-500">Daftar Kategori</h2>
-              <div className="flex flex-col space-y-1.5">
-                <button
-                  onClick={() => setSelectedCategory("Semua")}
-                  className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition-all text-left group ${
-                    selectedCategory === "Semua" ? "bg-black text-white" : "text-gray-600 hover:bg-gray-50 hover:text-gray-950"
-                  }`}
-                >
-                  <span>Semua Kategori</span>
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full transition-colors ${
-                    selectedCategory === "Semua" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500 group-hover:bg-gray-200"
-                  }`}>
-                    {certificates.length}
-                  </span>
-                </button>
-                <button
-                  onClick={() => setSelectedCategory("Unggulan")}
-                  className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition-all text-left group ${
-                    selectedCategory === "Unggulan" ? "bg-amber-600 text-white" : "text-amber-600 hover:bg-amber-50"
-                  }`}
-                >
-                  <span className="flex items-center gap-1.5 font-bold">
-                    <span>⭐</span> Unggulan
-                  </span>
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full transition-colors ${
-                    selectedCategory === "Unggulan" ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700 group-hover:bg-amber-200"
-                  }`}>
-                    {certificates.filter(cert => cert.isFeatured === true).length}
-                  </span>
-                </button>
-                {CATEGORIES.map((cat) => {
-                  const count = certificates.filter(cert => cert.category === cat).length;
-                  return (
-                    <button
-                      key={cat}
-                      onClick={() => setSelectedCategory(cat)}
-                      className={`flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition-all text-left group ${
-                        selectedCategory === cat ? "bg-black text-white" : "text-gray-600 hover:bg-gray-50 hover:text-gray-950"
-                      }`}
-                    >
-                      <span className="truncate mr-2">{cat}</span>
-                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full shrink-0 transition-colors ${
-                        selectedCategory === cat ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500 group-hover:bg-gray-200"
-                      }`}>
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </aside>
-
-          {/* Main Content */}
-          <main className="flex-1 flex flex-col gap-6 min-w-0">
+        {viewMode === "table" && isOwner ? (
+          <div className="flex-1 flex flex-col min-w-0 mt-4">
             {isOwner && isAdminVisible && (
               <AdminForm 
                 onSuccess={() => { setIsAdminVisible(false); setCertToEdit(null); }} 
@@ -467,82 +449,223 @@ function Vault() {
               </div>
             )}
 
-            {/* View Mode Switching Tabs */}
-            {isOwner && (
-              <div className="flex items-center justify-between border-b border-gray-200 pb-2 mb-2">
-                <div className="flex gap-4">
-                  <button
-                    onClick={() => setViewMode("grid")}
-                    className={`flex items-center gap-1.5 pb-2 text-sm font-extrabold border-b-2 transition-all ${
-                      viewMode === "grid"
-                        ? "border-black text-black"
-                        : "border-transparent text-gray-400 hover:text-black"
-                    }`}
-                  >
-                    <LayoutGrid className="w-4 h-4" />
-                    <span>Galeri Kredensial</span>
-                  </button>
-                  <button
-                    onClick={() => setViewMode("table")}
-                    className={`flex items-center gap-1.5 pb-2 text-sm font-extrabold border-b-2 transition-all ${
-                      viewMode === "table"
-                        ? "border-black text-black"
-                        : "border-transparent text-gray-400 hover:text-black"
-                    }`}
-                  >
-                    <Database className="w-4 h-4" />
-                    <span>Tabel Database</span>
-                  </button>
+            <div className="flex items-center justify-between border-b border-gray-200 pb-2 mb-6">
+              <div className="flex gap-4">
+                <Link
+                  to={`/u/${userId}`}
+                  className={`flex items-center gap-1.5 pb-2 text-sm font-extrabold border-b-2 transition-all border-transparent text-gray-400 hover:text-black`}
+                >
+                  <LayoutGrid className="w-4 h-4" />
+                  <span>Galeri Kredensial</span>
+                </Link>
+                <Link
+                  to={`/u/${userId}/database`}
+                  className={`flex items-center gap-1.5 pb-2 text-sm font-extrabold border-b-2 transition-all border-black text-black`}
+                >
+                  <Database className="w-4 h-4" />
+                  <span>Tabel Database</span>
+                </Link>
+              </div>
+              <div className="text-xs font-bold text-gray-500 bg-gray-100/80 px-2.5 py-1 rounded-md">
+                {filteredCerts.length} Total Sertifikat
+              </div>
+            </div>
+
+            <DatabaseView 
+              certificates={filteredCerts}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              onView={(cert) => navigate(`/c/${cert.id}`)}
+              onAddNew={() => {
+                setCertToEdit(null);
+                setIsAdminVisible(true);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              isOwner={isOwner || false}
+            />
+          </div>
+        ) : (
+          <>
+            {userId && (
+              <div className="mb-5 p-6 bg-white border border-gray-200 rounded-xl shadow-sm flex flex-col sm:flex-row gap-6 items-stretch">
+                {ownerProfile?.photoURL ? (
+                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border border-gray-200 shadow-sm shrink-0 self-center">
+                    <img src={ownerProfile.photoURL} alt={ownerName || "Profile"} className="w-full h-full object-cover" />
+                  </div>
+                ) : (
+                  <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100 shadow-sm shrink-0 self-center">
+                    <span className="text-3xl sm:text-4xl font-black">{(ownerName || "P").charAt(0).toUpperCase()}</span>
+                  </div>
+                )}
+                
+                <div className="flex-1 min-w-0 w-full flex flex-col justify-center">
+                  <div className="flex flex-col sm:flex-row sm:items-stretch justify-between gap-4 h-full">
+                    <div className="flex-1 flex flex-col justify-center py-1">
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-4 flex-wrap mb-2">
+                        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 leading-tight">
+                          {ownerName || (isOwner && user?.displayName) || "Pengguna"}
+                        </h2>
+                        
+                        <div className="flex flex-wrap items-center gap-3">
+                          {(ownerProfile?.socialLinks && Object.values(ownerProfile.socialLinks).some(link => link)) && (
+                            <>
+                              <div className="hidden sm:block w-px h-5 bg-gray-300"></div>
+                              <div className="flex flex-wrap items-center gap-1">
+                                {ownerProfile.socialLinks?.linkedin && (
+                                  <a href={ownerProfile.socialLinks.linkedin} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-500 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors" title="LinkedIn">
+                                    <Linkedin className="w-4 h-4" />
+                                  </a>
+                                )}
+                                {ownerProfile.socialLinks?.github && (
+                                  <a href={ownerProfile.socialLinks.github} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-200 rounded-lg transition-colors" title="GitHub">
+                                    <Github className="w-4 h-4" />
+                                  </a>
+                                )}
+                                {ownerProfile.socialLinks?.instagram && (
+                                  <a href={ownerProfile.socialLinks.instagram} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-500 hover:text-pink-600 hover:bg-pink-50 rounded-lg transition-colors" title="Instagram">
+                                    <Instagram className="w-4 h-4" />
+                                  </a>
+                                )}
+                                {ownerProfile.socialLinks?.website && (
+                                  <a href={ownerProfile.socialLinks.website} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-500 hover:text-gray-900 hover:bg-gray-200 rounded-lg transition-colors" title="Website">
+                                    <Globe className="w-4 h-4" />
+                                  </a>
+                                )}
+                              </div>
+                            </>
+                          )}
+                          
+                          {isOwner && (
+                            <button 
+                              onClick={() => {
+                                setIsShareModalOpen(true);
+                                setIsCopiedShare(false);
+                              }}
+                              className="px-3 py-1.5 bg-blue-50 text-blue-600 font-semibold rounded-lg hover:bg-blue-100 transition-colors flex items-center justify-center gap-1.5 text-xs shadow-sm border border-blue-100/50"
+                            >
+                              <Share2 className="w-3.5 h-3.5" />
+                              Bagikan Profil
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {ownerProfile?.bio ? (
+                        <p className="text-sm text-gray-600 mt-2 max-w-2xl leading-relaxed break-words">{ownerProfile.bio}</p>
+                      ) : (
+                        <p className="text-sm text-gray-400 mt-2 italic">Belum ada bio.</p>
+                      )}
+                    </div>
+                    
+                    <div className="flex flex-col sm:items-end shrink-0">
+                      <div className="bg-gradient-to-br from-blue-50 to-indigo-50/40 border border-blue-100/70 rounded-xl px-6 shadow-sm text-center min-w-[140px] flex flex-col justify-center items-center h-full min-h-[80px]">
+                        <div className="text-[10px] font-extrabold text-blue-700/80 uppercase tracking-widest mb-1">Total Sertifikat</div>
+                        <div className="flex items-baseline justify-center">
+                          <span className="text-4xl font-black text-gray-900 tracking-tight">{certificates.length}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
 
-            {viewMode === "table" && isOwner ? (
-              <DatabaseView 
-                certificates={certificates}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onView={(cert) => navigate(`/c/${cert.id}`)}
-                onAddNew={() => {
-                  setCertToEdit(null);
-                  setIsAdminVisible(true);
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
-                isOwner={isOwner || false}
-              />
-            ) : isLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {[1, 2, 3].map(i => (
-                  <div key={i} className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex flex-col">
-                     <div className="h-48 bg-gray-100 rounded-lg animate-pulse mb-4"></div>
-                     <div className="h-4 bg-gray-100 rounded animate-pulse w-3/4 mb-2"></div>
-                     <div className="h-4 bg-gray-100 rounded animate-pulse w-1/2"></div>
-                  </div>
-                ))}
-              </div>
-            ) : filteredCerts.length > 0 ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredCerts.map((cert) => (
-                  <CertificateCard 
-                    key={cert.id} 
-                    cert={cert} 
-                    onClick={() => navigate(`/c/${cert.id}`)} 
+            <div className="flex flex-col gap-8 flex-grow">
+              {/* Main Content */}
+              <main className="flex-1 flex flex-col gap-6 min-w-0">
+                {isOwner && isAdminVisible && (
+                  <AdminForm 
+                    onSuccess={() => { setIsAdminVisible(false); setCertToEdit(null); }} 
+                    onCancel={() => { setIsAdminVisible(false); setCertToEdit(null); }}
+                    user={user}
+                    initialData={certToEdit || undefined}
                   />
-                ))}
-              </div>
-            ) : !errorInfo && (
-              <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-white rounded-xl border border-gray-100 shadow-sm">
-                <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
-                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                  </svg>
-                </div>
-                <h3 className="text-lg font-medium text-gray-900 mb-1">Belum ada sertifikat di sini</h3>
-                <p className="text-sm text-gray-500">{isOwner ? "Unggah sertifikat pertama Anda untuk memulai." : "Pengguna ini belum mengunggah sertifikat apa pun."}</p>
-              </div>
-            )}
-          </main>
-        </div>
+                )}
+
+                {errorInfo && (
+                  <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm mb-6 border border-red-100">
+                    {errorInfo}
+                  </div>
+                )}
+
+                {/* View Mode Switching Tabs */}
+                {isOwner ? (
+                  <div className="flex items-center justify-between border-b border-gray-200 pb-2 mb-2">
+                    <div className="flex gap-4">
+                      <Link
+                        to={`/u/${userId}`}
+                        className={`flex items-center gap-1.5 pb-2 text-sm font-extrabold border-b-2 transition-all ${
+                          viewMode === "grid"
+                            ? "border-black text-black"
+                            : "border-transparent text-gray-400 hover:text-black"
+                        }`}
+                      >
+                        <LayoutGrid className="w-4 h-4" />
+                        <span>Galeri Kredensial</span>
+                      </Link>
+                      <Link
+                        to={`/u/${userId}/database`}
+                        className={`flex items-center gap-1.5 pb-2 text-sm font-extrabold border-b-2 transition-all ${
+                          viewMode === "table"
+                            ? "border-black text-black"
+                            : "border-transparent text-gray-400 hover:text-black"
+                        }`}
+                      >
+                        <Database className="w-4 h-4" />
+                        <span>Tabel Database</span>
+                      </Link>
+                    </div>
+                    <div className="text-xs font-bold text-gray-500 bg-gray-100/80 px-2.5 py-1 rounded-md">
+                      {filteredCerts.length} Sertifikat
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between border-b border-gray-200 pb-2 mb-4">
+                    <div className="flex items-center gap-1.5 pb-2 text-sm font-extrabold text-black">
+                      <LayoutGrid className="w-4 h-4" />
+                      <span>Galeri Kredensial</span>
+                    </div>
+                    <div className="text-xs font-bold text-gray-500 bg-gray-100/80 px-2.5 py-1 rounded-md">
+                      {filteredCerts.length} Sertifikat
+                    </div>
+                  </div>
+                )}
+
+                {isLoading ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {[1, 2, 3, 4].map(i => (
+                      <div key={i} className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm flex flex-col">
+                        <div className="h-48 bg-gray-100 rounded-lg animate-pulse mb-4"></div>
+                        <div className="h-4 bg-gray-100 rounded animate-pulse w-3/4 mb-2"></div>
+                        <div className="h-4 bg-gray-100 rounded animate-pulse w-1/2"></div>
+                      </div>
+                    ))}
+                  </div>
+                ) : filteredCerts.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                    {filteredCerts.map((cert) => (
+                      <CertificateCard 
+                        key={cert.id} 
+                        cert={cert} 
+                        onClick={() => navigate(`/c/${cert.id}`)} 
+                      />
+                    ))}
+                  </div>
+                ) : !errorInfo && (
+                  <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-white rounded-xl border border-gray-100 shadow-sm">
+                    <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
+                      <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                      </svg>
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-1">Belum ada sertifikat di sini</h3>
+                    <p className="text-sm text-gray-500">{isOwner ? "Unggah sertifikat pertama Anda untuk memulai." : "Pengguna ini belum mengunggah sertifikat apa pun."}</p>
+                  </div>
+                )}
+              </main>
+            </div>
+          </>
+        )}
         
         <footer className="mt-8 py-4 border-t border-gray-200 text-center text-sm text-gray-500">
           <p>SertifIn &copy; {new Date().getFullYear()}</p>
@@ -646,8 +769,9 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/c/:certId" element={<CertificatePage />} />
-        <Route path="/u/:userId" element={<Vault />} />
-        <Route path="/" element={<Vault />} />
+        <Route path="/u/:userId/database" element={<Vault defaultView="table" />} />
+        <Route path="/u/:userId" element={<Vault defaultView="grid" />} />
+        <Route path="/" element={<Vault defaultView="grid" />} />
       </Routes>
     </Router>
   );

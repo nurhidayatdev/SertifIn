@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { X } from "lucide-react";
+import { X, Upload, Image as ImageIcon, Plus, Trash2 } from "lucide-react";
 import { User } from "firebase/auth";
 import { db } from "../firebase";
 import { doc, getDoc, setDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { UserProfile } from "../types";
 import { useNavigate } from "react-router-dom";
+import { ImageCropperModal } from "./ImageCropperModal";
 
 export function ProfileSettingsModal({ 
   user, 
@@ -18,10 +19,21 @@ export function ProfileSettingsModal({
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [bio, setBio] = useState("");
+  const [photoURL, setPhotoURL] = useState("");
+  const [socialLinks, setSocialLinks] = useState({
+    linkedin: "",
+    instagram: "",
+    github: "",
+    website: ""
+  });
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+
+  // For cropper
+  const [imageToCrop, setImageToCrop] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -32,8 +44,17 @@ export function ProfileSettingsModal({
           const profile = docSnap.data() as UserProfile;
           setUsername(profile.username || "");
           setDisplayName((profile.displayName || user.displayName || "").replace(/[^a-zA-Z\s]/g, "").toUpperCase());
+          setBio(profile.bio || "");
+          setPhotoURL(profile.photoURL || user.photoURL || "");
+          setSocialLinks({
+            linkedin: profile.socialLinks?.linkedin || "",
+            instagram: profile.socialLinks?.instagram || "",
+            github: profile.socialLinks?.github || "",
+            website: profile.socialLinks?.website || ""
+          });
         } else {
           setDisplayName((user.displayName || "").replace(/[^a-zA-Z\s]/g, "").toUpperCase());
+          setPhotoURL(user.photoURL || "");
         }
       } catch (e) {
         console.error(e);
@@ -43,6 +64,23 @@ export function ProfileSettingsModal({
     };
     fetchProfile();
   }, [user]);
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) { // 2MB limit
+      setError("Ukuran gambar tidak boleh lebih dari 2MB");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setImageToCrop(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = ""; // reset input
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,11 +128,16 @@ export function ProfileSettingsModal({
          return;
       }
 
-      await setDoc(doc(db, "users", user.uid), {
+      const profileData: UserProfile = {
         uid: user.uid,
         username: cleanUsername,
         displayName: cleanDisplayName,
-      }, { merge: true });
+        bio,
+        photoURL,
+        socialLinks
+      };
+
+      await setDoc(doc(db, "users", user.uid), profileData, { merge: true });
 
       setSuccess("Profil berhasil diperbarui!");
       navigate(`/u/${cleanUsername}`, { replace: true });
@@ -108,124 +151,195 @@ export function ProfileSettingsModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div 
-        className="absolute inset-0 bg-gray-950/55 backdrop-blur-[4px]" 
-        onClick={() => {
-          if (!isForceFill) onClose();
-        }}
-      />
-      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-gray-100 z-10 relative overflow-hidden animate-in zoom-in-95 duration-200">
-        <div className="flex items-center justify-between px-6 py-4.5 border-b border-gray-100">
-          <div>
-            <h2 className="text-lg font-bold text-gray-900">Lengkapi Profil Anda</h2>
-            {isForceFill && (
-              <p className="text-xs text-blue-600 font-medium mt-0.5 animate-pulse">Langkah wajib sebelum menggunakan aplikasi</p>
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div 
+          className="absolute inset-0 bg-gray-950/55 backdrop-blur-[4px]" 
+          onClick={() => {
+            if (!isForceFill) onClose();
+          }}
+        />
+        <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-gray-100 z-10 relative overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200">
+          <div className="flex flex-shrink-0 items-center justify-between px-6 py-4.5 border-b border-gray-100">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">Lengkapi Profil Anda</h2>
+              {isForceFill && (
+                <p className="text-xs text-blue-600 font-medium mt-0.5 animate-pulse">Langkah wajib sebelum menggunakan aplikasi</p>
+              )}
+            </div>
+            {!isForceFill && (
+              <button onClick={onClose} className="text-gray-400 hover:text-gray-900 p-1.5 hover:bg-gray-50 rounded-lg transition-colors">
+                <X size={20} />
+              </button>
             )}
           </div>
-          {!isForceFill && (
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-900 p-1.5 hover:bg-gray-50 rounded-lg transition-colors">
-              <X size={20} />
-            </button>
-          )}
-        </div>
-        
-        <form onSubmit={handleSave} className="p-6">
-          {isLoading ? (
-            <div className="space-y-4 animate-pulse">
-              <div className="h-4 bg-gray-200 rounded w-1/3"></div>
-              <div className="h-10 bg-gray-200 rounded w-full"></div>
-              <div className="h-4 bg-gray-200 rounded w-1/4"></div>
-              <div className="h-10 bg-gray-200 rounded w-full"></div>
-            </div>
-          ) : (
-            <>
-              <div className="space-y-5">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
-                    Nama Pemilik Sertifikat (Sesuai KTP/Ijazah)
-                  </label>
-                  <input 
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => {
-                      const uppercaseNoNumSymbol = e.target.value.replace(/[^a-zA-Z\s]/g, "").toUpperCase();
-                      setDisplayName(uppercaseNoNumSymbol);
-                    }}
-                    className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-bold tracking-wide"
-                    placeholder="CONTOH: NUR HIDAYAT"
-                    required
-                  />
-                  <p className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">
-                    Nama ini akan digunakan secara otomatis pada halaman kredensial Anda.
-                  </p>
-                  <p className="text-[10px] text-amber-600 font-semibold mt-1 flex items-center gap-1">
-                    <span>⚠️</span> Hanya menerima karakter huruf (A-Z) dan spasi (tanpa angka/simbol).
-                  </p>
-                </div>
+          
+          <form onSubmit={handleSave} className="overflow-y-auto p-6 flex-1">
+            {isLoading ? (
+              <div className="space-y-4 animate-pulse">
+                <div className="h-4 bg-gray-200 rounded w-1/3"></div>
+                <div className="h-10 bg-gray-200 rounded w-full"></div>
+                <div className="h-4 bg-gray-200 rounded w-1/4"></div>
+                <div className="h-10 bg-gray-200 rounded w-full"></div>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-6">
+                  <div className="flex flex-col sm:flex-row items-center gap-4 border-b border-gray-100 pb-6">
+                    <div className="relative">
+                      <div className="w-24 h-24 rounded-full bg-gray-100 overflow-hidden border-2 border-white shadow-md">
+                        {photoURL ? (
+                          <img src={photoURL} alt="Profile" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-gray-400">
+                            <ImageIcon className="w-8 h-8" />
+                          </div>
+                        )}
+                      </div>
+                      <label className="absolute bottom-0 right-0 bg-white p-1.5 rounded-full shadow-lg border border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors">
+                        <Upload className="w-4 h-4 text-gray-600" />
+                        <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+                      </label>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-900">Foto Profil</h3>
+                      <p className="text-xs text-gray-500 mt-1">Gunakan foto asli atau biarkan kosong untuk menggunakan foto akun Google.</p>
+                    </div>
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
-                    Tautan dan Nama Alias Profil
-                  </label>
-                  <div className="flex items-center">
-                    <span className="inline-flex bg-gray-50 border border-r-0 border-gray-300 rounded-l-lg px-3 py-2.5 text-sm text-gray-400 font-mono select-none">
-                      /u/
-                    </span>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
+                      Nama Pemilik Sertifikat (Sesuai KTP/Ijazah)
+                    </label>
                     <input 
                       type="text"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value.toLowerCase())}
-                      className="flex-1 w-full border border-gray-300 rounded-r-lg px-4 py-2.5 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-mono"
-                      placeholder="nurhidayat"
+                      value={displayName}
+                      onChange={(e) => {
+                        const uppercaseNoNumSymbol = e.target.value.replace(/[^a-zA-Z\s]/g, "").toUpperCase();
+                        setDisplayName(uppercaseNoNumSymbol);
+                      }}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-bold tracking-wide"
+                      placeholder="CONTOH: NUR HIDAYAT"
                       required
                     />
+                    <p className="text-[11px] text-gray-400 mt-1.5 leading-relaxed">
+                      Nama ini akan digunakan secara otomatis pada halaman kredensial Anda.
+                    </p>
+                    <p className="text-[10px] text-amber-600 font-semibold mt-1 flex items-center gap-1">
+                      <span>⚠️</span> Hanya menerima karakter huruf (A-Z) dan spasi (tanpa angka/simbol).
+                    </p>
                   </div>
-                  <p className="text-[11px] text-gray-450 mt-1.5 leading-relaxed">
-                    Alamat web unik portofolio Anda: <span className="font-mono text-gray-600 bg-gray-50 px-1 rounded">{window.location.origin}/u/{username || "nurhidayat"}</span>
-                  </p>
-                  <div className="mt-1.5 flex flex-wrap gap-1 text-[10px] text-gray-500 font-medium">
-                    <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Min. 4 Karakter</span>
-                    <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Awal: Harus Huruf Kecil</span>
-                    <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Akhir: Bukan Simbol (-)</span>
-                    <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Huruf Kecil, Angka, Simbol (-)</span>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
+                      Tautan dan Nama Alias Profil
+                    </label>
+                    <div className="flex items-center">
+                      <span className="inline-flex bg-gray-50 border border-r-0 border-gray-300 rounded-l-lg px-3 py-2.5 text-sm text-gray-400 font-mono select-none">
+                        /u/
+                      </span>
+                      <input 
+                        type="text"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                        className="flex-1 w-full border border-gray-300 rounded-r-lg px-4 py-2.5 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-mono"
+                        placeholder="nurhidayat"
+                        required
+                      />
+                    </div>
+                    <p className="text-[11px] text-gray-450 mt-1.5 leading-relaxed">
+                      Alamat web unik portofolio Anda: <span className="font-mono text-gray-600 bg-gray-50 px-1 rounded">{window.location.origin}/u/{username || "nurhidayat"}</span>
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap gap-1 text-[10px] text-gray-500 font-medium">
+                      <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Min. 4 Karakter</span>
+                      <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Awal: Harus Huruf Kecil</span>
+                      <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Akhir: Bukan Simbol (-)</span>
+                      <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">Huruf Kecil, Angka, Simbol (-)</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">
+                      Bio Singkat
+                    </label>
+                    <textarea 
+                      value={bio}
+                      onChange={(e) => setBio(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all resize-none h-20"
+                      placeholder="Ceritakan sedikit tentang diri Anda, keahlian, atau fokus karir..."
+                      maxLength={160}
+                    />
+                    <p className="text-[11px] text-gray-400 mt-1 text-right">{bio.length}/160</p>
+                  </div>
+
+                  <div className="border-t border-gray-100 pt-5">
+                    <h3 className="text-sm font-bold text-gray-900 mb-4">Tautan Sosial Media (Opsional)</h3>
+                    <div className="space-y-3">
+                      <div className="flex items-center">
+                        <span className="w-24 text-xs font-semibold text-gray-600">LinkedIn</span>
+                        <input type="url" placeholder="https://linkedin.com/in/..." value={socialLinks.linkedin} onChange={(e) => setSocialLinks({...socialLinks, linkedin: e.target.value})} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div className="flex items-center">
+                        <span className="w-24 text-xs font-semibold text-gray-600">GitHub</span>
+                        <input type="url" placeholder="https://github.com/..." value={socialLinks.github} onChange={(e) => setSocialLinks({...socialLinks, github: e.target.value})} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div className="flex items-center">
+                        <span className="w-24 text-xs font-semibold text-gray-600">Instagram</span>
+                        <input type="url" placeholder="https://instagram.com/..." value={socialLinks.instagram} onChange={(e) => setSocialLinks({...socialLinks, instagram: e.target.value})} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                      <div className="flex items-center">
+                        <span className="w-24 text-xs font-semibold text-gray-600">Website</span>
+                        <input type="url" placeholder="https://..." value={socialLinks.website} onChange={(e) => setSocialLinks({...socialLinks, website: e.target.value})} className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-              
-              {error && (
-                <div className="mt-4 p-3 bg-red-50 border border-red-100 rounded-lg text-red-600 text-xs font-semibold leading-relaxed">
-                  {error}
-                </div>
-              )}
-              {success && (
-                <div className="mt-4 p-3 bg-green-50 border border-green-100 rounded-lg text-green-700 text-xs font-semibold leading-relaxed">
-                  {success}
-                </div>
-              )}
-              
-              <div className="mt-6 flex justify-end gap-3 border-t border-gray-50 pt-4">
-                {!isForceFill && (
-                  <button
-                    type="button"
-                    onClick={onClose}
-                    className="px-4 py-2 text-sm font-semibold text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors"
-                  >
-                    Batal
-                  </button>
+                
+                {error && (
+                  <div className="mt-4 p-3 bg-red-50 border border-red-100 rounded-lg text-red-600 text-xs font-semibold leading-relaxed">
+                    {error}
+                  </div>
                 )}
-                <button
-                  type="submit"
-                  disabled={isSaving || !username || !displayName}
-                  className="px-5 py-2 bg-black text-white text-sm font-bold rounded-lg hover:bg-gray-800 focus:outline-none focus:ring-4 focus:ring-gray-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {isSaving ? "Menyimpan..." : "Simpan Profil"}
-                </button>
-              </div>
-            </>
-          )}
-        </form>
+                {success && (
+                  <div className="mt-4 p-3 bg-green-50 border border-green-100 rounded-lg text-green-700 text-xs font-semibold leading-relaxed">
+                    {success}
+                  </div>
+                )}
+                
+                <div className="mt-6 flex justify-end gap-3 border-t border-gray-50 pt-4 sticky bottom-0 bg-white z-10">
+                  {!isForceFill && (
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="px-4 py-2 text-sm font-semibold text-gray-600 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors"
+                    >
+                      Batal
+                    </button>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={isSaving || !username || !displayName}
+                    className="px-5 py-2 bg-black text-white text-sm font-bold rounded-lg hover:bg-gray-800 focus:outline-none focus:ring-4 focus:ring-gray-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isSaving ? "Menyimpan..." : "Simpan Profil"}
+                  </button>
+                </div>
+              </>
+            )}
+          </form>
+        </div>
       </div>
-    </div>
+      
+      {imageToCrop && (
+        <ImageCropperModal
+          imageSrc={imageToCrop}
+          onCropComplete={(croppedImg) => {
+            setPhotoURL(croppedImg);
+            setImageToCrop(null);
+          }}
+          onCancel={() => setImageToCrop(null)}
+        />
+      )}
+    </>
   );
 }

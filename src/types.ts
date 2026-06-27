@@ -2,6 +2,14 @@ export interface UserProfile {
   uid: string;
   username: string; // custom alias
   displayName: string;
+  photoURL?: string;
+  bio?: string;
+  socialLinks?: {
+    linkedin?: string;
+    instagram?: string;
+    github?: string;
+    website?: string;
+  };
 }
 
 export interface Certificate {
