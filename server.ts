@@ -3,6 +3,10 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
+import fs from "fs";
+import cors from "cors";
 
 dotenv.config();
 
@@ -15,15 +19,102 @@ const ai = new GoogleGenAI({
   }
 });
 
+let db: any = null;
+try {
+  const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(firebaseConfigPath)) {
+    const configRaw = fs.readFileSync(firebaseConfigPath, "utf-8");
+    const firebaseConfig = JSON.parse(configRaw);
+    const finalConfig = firebaseConfig.default || firebaseConfig;
+    const app = initializeApp(finalConfig);
+    db = getFirestore(app, finalConfig.firestoreDatabaseId || "ai-studio-40528eed-0559-4c22-b7a5-6fd23c02df7c");
+  }
+} catch (error) {
+  console.error("Failed to initialize Firebase on server:", error);
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
+
+  // Enable CORS for all routes so other websites can fetch from this API
+  app.use(cors());
 
   // Increase payload limit for large base64 files
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
   // API endpoints
+  
+  // Public API to get certificate stats for a user
+  app.get("/api/stats/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { startDate, endDate } = req.query; // YYYY-MM-DD
+      
+      if (!db) {
+        return res.status(500).json({ error: "Database not initialized" });
+      }
+
+      let targetUid = userId;
+      
+      // Resolve username to UID if necessary
+      const usersRef = collection(db, "users");
+      let userDoc = null;
+      try {
+        const userDocRef = doc(db, "users", userId);
+        userDoc = await getDoc(userDocRef);
+      } catch (e) {
+        // Ignore errors
+      }
+      
+      if (!userDoc || !userDoc.exists()) {
+        // Try as username
+        const qUser = query(usersRef, where("username", "==", userId));
+        const userQuerySnapshot = await getDocs(qUser);
+        if (!userQuerySnapshot.empty) {
+          targetUid = userQuerySnapshot.docs[0].data().uid;
+        }
+      } else {
+        targetUid = userDoc.data().uid;
+      }
+
+      const certsRef = collection(db, "certificates");
+      const q = query(certsRef, where("userId", "==", targetUid));
+      
+      const querySnapshot = await getDocs(q);
+      let certs: any[] = [];
+      querySnapshot.forEach((doc) => {
+        certs.push({ id: doc.id, ...doc.data() });
+      });
+
+      // Filter by date range if provided
+      if (startDate || endDate) {
+        certs = certs.filter(cert => {
+          if (!cert.date) return false;
+          const certDate = new Date(cert.date);
+          let isValid = true;
+          if (startDate && new Date(startDate as string) > certDate) isValid = false;
+          if (endDate && new Date(endDate as string) < certDate) isValid = false;
+          return isValid;
+        });
+      }
+
+      res.json({
+        userId,
+        totalCertificates: certs.length,
+        dateRange: {
+          start: startDate || "all",
+          end: endDate || "all"
+        }
+      });
+
+    } catch (error: any) {
+      console.error("Stats API error:", error);
+      res.status(500).json({ error: "Failed to fetch stats" });
+    }
+  });
+
   app.post("/api/extract", async (req, res) => {
     try {
       const { data, mimeType } = req.body;
